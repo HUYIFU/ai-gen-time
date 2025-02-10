@@ -1,7 +1,7 @@
 "use client";
 import { inject, injectable } from "inversify";
 import { type AIStore } from "./AIStore";
-import { Conversation, Message } from "@/types";
+import { Conversation, ConversationStatus, Message } from "@/types";
 import { generateUniqueId } from "@/utils/unique";
 
 @injectable()
@@ -19,6 +19,7 @@ export class ConversationService {
       id: conversationId,
       name: "未命名对话",
       messages: [{ id: generateUniqueId(), content: userInput, role: "user" }],
+      status: "init",
     };
 
     this.aiStore.setCurrentConversationId(conversationId);
@@ -30,10 +31,23 @@ export class ConversationService {
     return conversationId;
   }
 
+  private updateConversationStatus(
+    conversationId: string,
+    status: ConversationStatus
+  ) {
+    this.aiStore.setConversations(
+      this.aiStore.conversations.map((conversation) => ({
+        ...conversation,
+        status:
+          conversation.id === conversationId ? status : conversation.status,
+      }))
+    );
+  }
+
   public async sendUserMessage(userInput: string): Promise<void> {
     const { conversation } = this.aiStore.computed;
     const { messages = [] } = conversation || {};
-
+    const newMessages = [...messages];
     // 使用一个临时变量来存储累积的内容
     let accumulatedContent = "";
     const assistantMessageId = generateUniqueId();
@@ -44,17 +58,20 @@ export class ConversationService {
         content: userInput,
         role: "user",
       };
-      this.aiStore.setMessages([...messages, newMessage]);
+      newMessages.push(newMessage);
+      this.aiStore.setMessages(newMessages);
     }
 
     try {
+      // 开始流式响应
+      this.updateConversationStatus(conversation.id, "start");
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "text/event-stream",
         },
-        body: JSON.stringify({ messages }),
+        body: JSON.stringify({ messages: newMessages }),
       });
 
       const reader = response.body?.getReader();
@@ -63,8 +80,8 @@ export class ConversationService {
       if (!reader) {
         throw new Error("No reader available");
       }
-
       while (true) {
+        this.updateConversationStatus(conversation.id, "streaming");
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -76,21 +93,30 @@ export class ConversationService {
             try {
               const jsonStr = line.slice(6); // 移除 'data: ' 前缀
               const { text } = JSON.parse(jsonStr);
+              if (text === "[DONE]") {
+                this.updateConversationStatus(conversation.id, "done");
+                break;
+              }
               accumulatedContent += text;
               const updatedAssistantMessage: Message = {
                 id: assistantMessageId,
                 content: accumulatedContent,
                 role: "assistant",
               };
-              this.aiStore.setMessages([...messages, updatedAssistantMessage]);
+              this.aiStore.setMessages([
+                ...newMessages,
+                updatedAssistantMessage,
+              ]);
             } catch (e) {
               console.error("Error parsing SSE data:", e);
             }
           }
         }
       }
+      this.updateConversationStatus(conversation.id, "done");
     } catch (error) {
       console.error("Error during SSE:", error);
+      this.updateConversationStatus(conversation.id, "error");
       // 处理错误情况
     }
   }

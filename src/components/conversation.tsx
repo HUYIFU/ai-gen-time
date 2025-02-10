@@ -1,24 +1,23 @@
 "use client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Mic, MoreHorizontal, SendHorizontal } from "lucide-react";
+import { Mic, MoreHorizontal, SendHorizontal, Bot, User } from "lucide-react";
 import { useState } from "react";
 import { useViewless } from "@/app/services";
-import ReactMarkdown from "react-markdown";
+import { ReactTyped } from "react-typed";
+// import { RenderMDX } from "./render-mdx";
+import MarkdownRenderer from "./md/render-md";
 
 export function Conversation() {
   const { AIStore, ConversationService } = useViewless();
   const { computed } = AIStore;
   const { conversation } = computed;
-  const { messages = [] } = conversation || {};
+  const { messages = [], status } = conversation || {};
   const [input, setInput] = useState("");
-  const [isStreaming, setIsStreaming] = useState(false);
 
   const sendMessage = async (userInput: string) => {
     setInput("");
-    setIsStreaming(true);
     ConversationService.sendUserMessage(userInput);
-    setIsStreaming(false);
   };
 
   return (
@@ -29,12 +28,23 @@ export function Conversation() {
           <MoreHorizontal className="h-6 w-6" />
         </Button>
       </div>
-      <div className="p-4 flex-1 flex flex-col gap-3">
+      <div className="p-7 flex-1 flex flex-col gap-5 max-h-[calc(100vh-40px)] overflow-y-auto">
         {messages.map((message) => (
           <div key={message.id} className="prose dark:prose-invert max-w-none">
-            <ReactMarkdown>{message.content}</ReactMarkdown>
+            {message.role === "user" ? <User /> : <Bot />}
+            <MarkdownRenderer md={message.content} />
           </div>
         ))}
+
+        {status === "start" && (
+          <div className="text-sm text-gray-500">
+            <ReactTyped
+              strings={["思考中..."]}
+              typeSpeed={50}
+              showCursor={true}
+            />
+          </div>
+        )}
       </div>
       <div className="p-4 max-w-3xl mx-auto w-full">
         <div className="flex gap-2 items-center">
@@ -42,6 +52,11 @@ export function Conversation() {
             className="flex-1"
             placeholder="给 ChatGPT 发送消息"
             value={input}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                sendMessage(input);
+              }
+            }}
             onChange={(e) => setInput(e.target.value)}
           />
           <Button variant="ghost" size="icon">
@@ -50,7 +65,7 @@ export function Conversation() {
           <Button
             size="icon"
             onClick={() => sendMessage(input)}
-            disabled={isStreaming}
+            disabled={["streaming", "start"].includes(status)}
           >
             <SendHorizontal className="h-6 w-6" />
           </Button>

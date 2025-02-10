@@ -27,7 +27,8 @@ export async function POST(req: NextRequest) {
         messages: [
           {
             role: "system",
-            content: "You are a helpful assistant. 请使用中文回答",
+            content:
+              "You are a helpful assistant. Use plain English. If the original is not in English, translate it.",
           },
           ...messages,
         ],
